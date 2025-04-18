@@ -5,9 +5,11 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.os.Bundle
+import android.os.Environment
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 import java.nio.ByteBuffer
 
 class MainActivity : FlutterActivity() {
@@ -30,6 +32,42 @@ class MainActivity : FlutterActivity() {
 
                     Log.d(TAG, "Cutting audio: $inputPath -> $outputPath ($startMs to $endMs ms)")
 
+                    // Check if input file exists and is readable
+                    val inputFile = File(inputPath)
+                    if (!inputFile.exists()) {
+                        val errorMsg = "Input file does not exist: $inputPath"
+                        Log.e(TAG, errorMsg)
+                        result.error("FILE_NOT_FOUND", errorMsg, null)
+                        return@setMethodCallHandler
+                    }
+                    
+                    if (!inputFile.canRead()) {
+                        val errorMsg = "Cannot read input file (permission denied): $inputPath"
+                        Log.e(TAG, errorMsg)
+                        result.error("PERMISSION_DENIED", errorMsg, null)
+                        return@setMethodCallHandler
+                    }
+
+                    // Check if output directory exists and is writable
+                    val outputFile = File(outputPath)
+                    val outputDir = outputFile.parentFile
+                    if (outputDir != null && !outputDir.exists()) {
+                        val dirCreated = outputDir.mkdirs()
+                        if (!dirCreated) {
+                            val errorMsg = "Failed to create output directory: ${outputDir.path}"
+                            Log.e(TAG, errorMsg)
+                            result.error("DIRECTORY_ERROR", errorMsg, null)
+                            return@setMethodCallHandler
+                        }
+                    }
+                    
+                    if (outputDir != null && !outputDir.canWrite()) {
+                        val errorMsg = "Cannot write to output directory (permission denied): ${outputDir.path}"
+                        Log.e(TAG, errorMsg)
+                        result.error("PERMISSION_DENIED", errorMsg, null)
+                        return@setMethodCallHandler
+                    }
+
                     try {
                         cutAudio(inputPath!!, outputPath!!, startMs, endMs)
                         Log.d(TAG, "Audio cut successfully")
@@ -51,8 +89,24 @@ class MainActivity : FlutterActivity() {
     private fun cutAudio(inputPath: String, outputPath: String, startMs: Int, endMs: Int) {
         Log.d(TAG, "Starting to cut audio...")
         
+        // Debug file system permissions
+        val inputFile = File(inputPath)
+        Log.d(TAG, "Input file exists: ${inputFile.exists()}, canRead: ${inputFile.canRead()}, size: ${inputFile.length()}")
+        
+        val outputFile = File(outputPath)
+        val outputDir = outputFile.parentFile
+        if (outputDir != null) {
+            Log.d(TAG, "Output directory exists: ${outputDir.exists()}, canWrite: ${outputDir.canWrite()}")
+        }
+        
         val extractor = MediaExtractor()
-        extractor.setDataSource(inputPath)
+        try {
+            extractor.setDataSource(inputPath)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to set data source", e)
+            throw Exception("Failed to access file: ${e.message}")
+        }
+        
         val trackIndex = selectTrack(extractor)
         Log.d(TAG, "Selected track: $trackIndex")
         
@@ -60,7 +114,10 @@ class MainActivity : FlutterActivity() {
 
         val format = extractor.getTrackFormat(trackIndex)
         val mime = format.getString(MediaFormat.KEY_MIME)
-        val duration = format.getLong(MediaFormat.KEY_DURATION)
+        val duration = if (format.containsKey(MediaFormat.KEY_DURATION)) 
+                         format.getLong(MediaFormat.KEY_DURATION) 
+                       else 
+                         0L
         Log.d(TAG, "Track format: $mime, duration: ${duration/1000}ms")
         
         val muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
