@@ -120,48 +120,104 @@ class MainActivity : FlutterActivity() {
                          0L
         Log.d(TAG, "Track format: $mime, duration: ${duration/1000}ms")
         
-        val muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        val muxerTrackIndex = muxer.addTrack(format)
-        muxer.start()
-
-        Log.d(TAG, "Seeking to $startMs ms")
-        extractor.seekTo(startMs * 1000L, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-        val buffer = ByteBuffer.allocate(1024 * 1024)
-        val info = MediaCodec.BufferInfo()
-        
-        var samplesCount = 0
-
-        while (true) {
-            val sampleSize = extractor.readSampleData(buffer, 0)
-            if (sampleSize < 0) {
-                Log.d(TAG, "End of samples reached")
-                break
-            }
-
-            val sampleTime = extractor.sampleTime
-            if (sampleTime > endMs * 1000L) {
-                Log.d(TAG, "End time reached: $sampleTime > ${endMs * 1000L}")
-                break
-            }
-
-            info.offset = 0
-            info.size = sampleSize
-            info.presentationTimeUs = sampleTime
-            info.flags = extractor.sampleFlags
-            muxer.writeSampleData(muxerTrackIndex, buffer, info)
-            extractor.advance()
-            samplesCount++
-            
-            if (samplesCount % 100 == 0) {
-                Log.d(TAG, "Processed $samplesCount samples")
-            }
+        // Fix MediaMuxer output format based on the file extension
+        val outputFormat = when {
+            outputPath.endsWith(".mp3", ignoreCase = true) -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+            outputPath.endsWith(".m4a", ignoreCase = true) -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+            outputPath.endsWith(".aac", ignoreCase = true) -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+            outputPath.endsWith(".wav", ignoreCase = true) -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+            else -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
         }
+        
+        try {
+            // Ensure the output file extension matches the container format
+            val outputPathWithCorrectExt = if (!outputPath.endsWith(".m4a", ignoreCase = true) && 
+                                             !outputPath.endsWith(".mp4", ignoreCase = true)) {
+                // Change extension to .m4a for better compatibility
+                val basePath = outputPath.substringBeforeLast(".")
+                "$basePath.m4a"
+            } else {
+                outputPath
+            }
+            
+            Log.d(TAG, "Using output path: $outputPathWithCorrectExt")
+            
+            val muxer = MediaMuxer(outputPathWithCorrectExt, outputFormat)
+            
+            // Check if format is compatible with MediaMuxer
+            val simplifiedFormat = MediaFormat.createAudioFormat(mime ?: "audio/mp4a-latm", 44100, 2)
+            if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                simplifiedFormat.setInteger(MediaFormat.KEY_SAMPLE_RATE, format.getInteger(MediaFormat.KEY_SAMPLE_RATE))
+            }
+            if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                simplifiedFormat.setInteger(MediaFormat.KEY_CHANNEL_COUNT, format.getInteger(MediaFormat.KEY_CHANNEL_COUNT))
+            }
+            if (format.containsKey(MediaFormat.KEY_BIT_RATE)) {
+                simplifiedFormat.setInteger(MediaFormat.KEY_BIT_RATE, format.getInteger(MediaFormat.KEY_BIT_RATE))
+            }
+            
+            val muxerTrackIndex = try {
+                muxer.addTrack(simplifiedFormat)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to add track with simplified format", e)
+                try {
+                    muxer.addTrack(format)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Failed to add track with original format", e2)
+                    throw Exception("Failed to add the track to the muxer: ${e2.message}")
+                }
+            }
+            
+            muxer.start()
+            
+            Log.d(TAG, "Seeking to $startMs ms")
+            extractor.seekTo(startMs * 1000L, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            val buffer = ByteBuffer.allocate(1024 * 1024)
+            val info = MediaCodec.BufferInfo()
+            
+            var samplesCount = 0
 
-        Log.d(TAG, "Total samples processed: $samplesCount")
-        muxer.stop()
-        muxer.release()
-        extractor.release()
-        Log.d(TAG, "Audio cut completed")
+            while (true) {
+                val sampleSize = extractor.readSampleData(buffer, 0)
+                if (sampleSize < 0) {
+                    Log.d(TAG, "End of samples reached")
+                    break
+                }
+
+                val sampleTime = extractor.sampleTime
+                if (sampleTime > endMs * 1000L) {
+                    Log.d(TAG, "End time reached: $sampleTime > ${endMs * 1000L}")
+                    break
+                }
+
+                info.offset = 0
+                info.size = sampleSize
+                info.presentationTimeUs = sampleTime
+                info.flags = extractor.sampleFlags
+                
+                try {
+                    muxer.writeSampleData(muxerTrackIndex, buffer, info)
+                    samplesCount++
+                    
+                    if (samplesCount % 100 == 0) {
+                        Log.d(TAG, "Processed $samplesCount samples")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error writing sample data", e)
+                    break
+                }
+                extractor.advance()
+            }
+
+            Log.d(TAG, "Total samples processed: $samplesCount")
+            muxer.stop()
+            muxer.release()
+            extractor.release()
+            Log.d(TAG, "Audio cut completed")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in muxer operation", e)
+            throw e
+        }
     }
 
     private fun selectTrack(extractor: MediaExtractor): Int {
