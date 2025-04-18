@@ -1,6 +1,6 @@
 {
-    "name": "audiobook_cut",
-    "short_name": "audiobook_cut",
+    "name": "audiobookcut",
+    "short_name": "audiobookcut",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
