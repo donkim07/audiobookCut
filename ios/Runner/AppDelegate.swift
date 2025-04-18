@@ -9,7 +9,7 @@ import AVFoundation
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     let controller: FlutterViewController = window?.rootViewController as! FlutterViewController
-    let audioChannel = FlutterMethodChannel(name: "com.example.audiobook_cut/audio",
+    let audioChannel = FlutterMethodChannel(name: "com.example.audiobookcut/audio",
                                             binaryMessenger: controller.binaryMessenger)
     audioChannel.setMethodCallHandler { (call: FlutterMethodCall, result: @escaping FlutterResult) -> Void in
       if call.method == "cutAudio" {
@@ -32,24 +32,31 @@ import AVFoundation
   }
 
   private func cutAudio(inputPath: String, outputPath: String, startMs: Int, endMs: Int, result: @escaping FlutterResult) {
-    let startTime = CMTime(seconds: Double(startMs) / 1000.0, preferredTimescale: 600)
-    let endTime = CMTime(seconds: Double(endMs) / 1000.0, preferredTimescale: 600)
+    let startTime = CMTime(value: CMTimeValue(startMs), timescale: 1000)
+    let endTime = CMTime(value: CMTimeValue(endMs), timescale: 1000)
+    let timeRange = CMTimeRange(start: startTime, end: endTime)
+    
     let asset = AVAsset(url: URL(fileURLWithPath: inputPath))
     let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A)
-
-    exportSession?.outputURL = URL(fileURLWithPath: outputPath)
-    exportSession?.outputFileType = .m4a
-    exportSession?.timeRange = CMTimeRange(start: startTime, end: endTime)
-
-    exportSession?.exportAsynchronously {
-      switch exportSession?.status {
-      case .completed:
-        result(nil)
-      case .failed, .cancelled:
-        result(FlutterError(code: "EXPORT_FAILED", message: "Export failed", details: exportSession?.error?.localizedDescription))
-      default:
-        break
-      }
+    
+    guard exportSession != nil else {
+        result(FlutterError(code: "EXPORT_ERROR", message: "Could not create export session", details: nil))
+        return
+    }
+    
+    exportSession!.outputURL = URL(fileURLWithPath: outputPath)
+    exportSession!.outputFileType = .m4a
+    exportSession!.timeRange = timeRange
+    
+    exportSession!.exportAsynchronously {
+        switch exportSession!.status {
+        case .completed:
+            result(nil)
+        case .failed, .cancelled:
+            result(FlutterError(code: "EXPORT_FAILED", message: exportSession!.error?.localizedDescription ?? "Export failed", details: nil))
+        default:
+            result(FlutterError(code: "UNKNOWN_ERROR", message: "Unknown export error", details: nil))
+        }
     }
   }
 }
