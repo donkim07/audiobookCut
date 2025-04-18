@@ -37,6 +37,11 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+    
+    dependencies {
+        // Add FFmpeg for audio processing
+        implementation("com.arthenica:mobile-ffmpeg-full:4.4.LTS")
+    }
 }
 
 flutter {
